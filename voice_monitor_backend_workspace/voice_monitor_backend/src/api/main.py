@@ -1,8 +1,10 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi import status
 import os
 import json
+import numpy as np
 from typing import Dict
 
 # Import Speechbrain and torch
@@ -66,7 +68,8 @@ app = FastAPI(
     description="API for voice enrollment/upload and monitoring voice matches.",
     version="0.1.0",
     openapi_tags=[
-        {"name": "voice", "description": "User voice upload and enrollment API"}
+        {"name": "voice", "description": "User voice upload and enrollment API"},
+        {"name": "test", "description": "Voice test and similarity scoring"},
     ]
 )
 
@@ -87,65 +90,98 @@ def health_check():
 
 
 # PUBLIC_INTERFACE
+
+
 @app.post(
-    "/enroll/voice",
-    response_model=None,
-    tags=["voice"],
-    summary="Upload user voice for enrollment",
-    description="Upload a voice/audio file for user enrollment. Supports .wav, .mp3 etc."
+    "/test/voice",
+    tags=["test"],
+    summary="Test an uploaded audio sample against all enrolled voices",
+    description=(
+        "Upload a voice/audio sample. The embedding is computed (Speechbrain ECAPA-voxceleb) "
+        "and compared to all enrolled embeddings. Returns a ranked list of matches (user IDs and similarity scores)."
+    ),
+    response_description="A ranked list of enrolled user IDs and their similarity scores, best match first.",
 )
-async def upload_voice(
-    file: UploadFile = File(..., description="Audio file for enrollment (wav, mp3, etc.)"),
-    user_id: str = Query(..., description="Unique identifier for the user"),
+async def test_voice(
+    file: UploadFile = File(..., description="Audio file for test (wav, mp3, etc.)"),
 ):
     """
-    Upload a voice/audio file for enrollment using Speechbrain ECAPA-voxceleb to compute speaker
-    embedding.
+    PUBLIC_INTERFACE
+
+    Test an uploaded audio sample by computing its embedding and comparing to all
+    enrolled voice embeddings, returning a ranked list of matches.
+
+    - Accepts: WAV, MP3, M4A, OPUS, OGG files.
+    - Returns: List of dicts with user_id and similarity_score,
+      ranked best match first.
 
     Args:
-        file (UploadFile): Audio file, accepted formats: wav, mp3, m4a, opus, ogg.
-        user_id (str): Unique user identifier.
+        file (UploadFile): Audio file.
 
     Returns:
-        JSON with upload status and filename.
+        JSON: {
+            "matches": [{"user_id":..., "score":...}, ...],
+            "num_enrollments": int
+        }
     """
-    # File validation and save
+    # Validate and save the uploaded file temporarily
     ext = os.path.splitext(file.filename)[1].lower()
     if ext not in [".wav", ".mp3", ".m4a", ".opus", ".ogg"]:
         raise HTTPException(status_code=400, detail="Unsupported file type")
-    safe_filename = f"{user_id}_{file.filename}"
-    save_path = os.path.join(UPLOAD_DIR, safe_filename)
+    tmp_path = os.path.join(UPLOAD_DIR, f"_test_{file.filename}")
     try:
-        with open(save_path, "wb") as out_file:
+        with open(tmp_path, "wb") as out_file:
             while chunk := await file.read(8192):
                 out_file.write(chunk)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed saving file: {str(e)}")
 
-    # Compute real voiceprint embedding and store enrollment
+    # Compute test sample embedding
     try:
-        embedding = compute_embedding(save_path)
+        test_embedding = compute_embedding(tmp_path)
     except Exception as e:
+        os.remove(tmp_path)
         raise HTTPException(
             status_code=500,
             detail=f"Embedding computation failed: {str(e)}"
         )
-    enrollments = load_enrollments()
-    enrollments[user_id] = {
-        "filename": safe_filename,
-        "embedding": embedding
-    }
-    save_enrollments(enrollments)
+    # Remove temp file
+    try:
+        os.remove(tmp_path)
+    except Exception:
+        pass
 
+    # Prepare numpy array for test embedding
+    test_vec = np.array(test_embedding, dtype=np.float32)
+
+    # Load all enrollments
+    enrollments = load_enrollments()
+    matches = []
+    for user_id, data in enrollments.items():
+        enroll_emb = np.array(data.get("embedding", []), dtype=np.float32)
+        # Defensive: skip if shape mismatch or invalid embedding
+        if enroll_emb.shape != test_vec.shape or len(enroll_emb.shape) != 1:
+            continue
+        # Cosine similarity
+        dot = np.dot(test_vec, enroll_emb)
+        norm_test = np.linalg.norm(test_vec)
+        norm_enroll = np.linalg.norm(enroll_emb)
+        denom = (norm_test * norm_enroll + 1e-8)
+        score = float(dot) / denom
+        matches.append({"user_id": user_id, "score": score})
+
+    # Rank by descending similarity
+    matches_sorted = sorted(matches, key=lambda x: x["score"], reverse=True)
     return JSONResponse(
         content={
-            "status": "success",
-            "filename": safe_filename,
+            "matches": matches_sorted,
+            "num_enrollments": len(enrollments),
             "detail": (
-                "File uploaded. Enrollment with Speechbrain embedding completed."
+                "Tested against all enrolled voices. "
+                "Higher score = closer match."
             ),
         },
-        status_code=201
+        status_code=status.HTTP_200_OK,
     )
 
 
