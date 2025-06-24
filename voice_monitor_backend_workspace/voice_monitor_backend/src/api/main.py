@@ -3,6 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi import status
 
+# Import match log retrieval
+from .match_logger import get_logged_matches
+from pydantic import BaseModel, Field
+from typing import List
+
 import os
 import json
 import numpy as np
@@ -35,6 +40,7 @@ def get_speechbrain_classifier():
             }
         )
     return _classifier
+
 
 
 def compute_embedding(file_path: str):
@@ -153,6 +159,7 @@ async def test_voice(
     except Exception:
         pass
 
+
     # Prepare numpy array for test embedding
     test_vec = np.array(test_embedding, dtype=np.float32)
 
@@ -225,3 +232,48 @@ def enrollment_status(
         return {
             "status": "not_enrolled"
         }
+
+
+# PUBLIC_INTERFACE
+
+class MatchLogEntry(BaseModel):
+    """Log entry for an audio chunk similarity match."""
+    chunk_filename: str = Field(..., description="Chunked audio filename that matched")
+    matched_user_id: str = Field(..., description="User/enrollment ID that matched")
+    score: float = Field(..., description="Cosine similarity score (0.0 to 1.0)")
+    timestamp: str = Field(..., description="UTC timestamp of match (ISO 8601)")
+
+
+@app.get(
+    "/matches/active",
+    tags=["match"],
+    summary="List all current/active similarity matches",
+    description=(
+        "Returns all detected matches between chunked media audio and enrolled voices, where"
+        " similarity exceeds the alert threshold. Each entry includes chunk/media info, matched "
+        "user/enrollment ID, similarity score, and timestamp. Intended for dashboard polling."
+    ),
+    response_model=List[MatchLogEntry],
+    response_description="A list of logged match events, most recent last.",
+)
+def list_active_matches():
+    """
+    PUBLIC_INTERFACE
+
+    List all currently logged similarity matches between chunked media and enrolled voices.
+
+    Returns:
+        200 OK: List of match log entries in order of logging (most recent last).
+
+    Example response:
+        [
+            {
+                "chunk_filename": "yt_videoA_chunk003_10s.wav",
+                "matched_user_id": "user123",
+                "score": 0.814,
+                "timestamp": "2024-06-22T11:22:33.123456"
+            }
+        ]
+    """
+    matches = get_logged_matches()
+    return matches
