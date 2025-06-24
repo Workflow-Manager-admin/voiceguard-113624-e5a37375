@@ -1,21 +1,18 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, Query
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from fastapi import status
-
-# Import match log retrieval
-from .match_logger import get_logged_matches
-from pydantic import BaseModel, Field
-from typing import List
-
 import os
 import json
 import numpy as np
-from typing import Dict
+from typing import Dict, List
 
-# Import Speechbrain and torch
 import torch
 from speechbrain.pretrained import EncoderClassifier
+
+from fastapi import FastAPI, UploadFile, File, HTTPException, Query, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
+
+# Import match log retrieval
+from .match_logger import get_logged_matches
 
 # Constants
 UPLOAD_DIR = "uploaded_voices"
@@ -42,7 +39,6 @@ def get_speechbrain_classifier():
     return _classifier
 
 
-
 def compute_embedding(file_path: str):
     """
     Returns a numpy array representation of the Speechbrain ECAPA-voxceleb
@@ -55,8 +51,8 @@ def compute_embedding(file_path: str):
     return embedding_np
 
 
-# Simple persistence for demonstration (would be DB in prod)
 def load_enrollments() -> Dict[str, dict]:
+    """Simple persistence for demonstration (would be DB in prod)."""
     if not os.path.exists(EMBEDDING_FILE):
         return {}
     with open(EMBEDDING_FILE, "r") as f:
@@ -64,8 +60,25 @@ def load_enrollments() -> Dict[str, dict]:
 
 
 def save_enrollments(data: Dict[str, dict]) -> None:
+    """Save enrollments to JSON file."""
     with open(EMBEDDING_FILE, "w") as f:
         json.dump(data, f)
+
+
+def get_cors_origins() -> List[str]:
+    """Get CORS origins based on environment."""
+    cors_origins_env = os.environ.get("CORS_ORIGINS", "")
+    if cors_origins_env:
+        return [origin.strip() for origin in cors_origins_env.split(",")]
+
+    # In production, be more restrictive
+    if os.environ.get("ENVIRONMENT") == "production":
+        return [
+            "https://vscode-internal-655-beta.beta01.cloud.kavia.ai:3000",
+        ]
+
+    # In development, allow all for flexibility
+    return ["*"]
 
 
 app = FastAPI(
@@ -80,9 +93,9 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=get_cors_origins(),
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -94,8 +107,6 @@ def health_check():
 
 
 # PUBLIC_INTERFACE
-
-
 @app.post(
     "/test/voice",
     tags=["test"],
@@ -105,8 +116,8 @@ def health_check():
         "and compared to all enrolled embeddings. Returns a ranked list of matches (user IDs "
         "and similarity scores)."
     ),
-    response_description="A ranked list of enrolled user IDs and their similarity scores, "
-                        "best match first.",
+    response_description=("A ranked list of enrolled user IDs and their similarity scores, "
+                          "best match first."),
 )
 async def test_voice(
     file: UploadFile = File(..., description="Audio file for test (wav, mp3, etc.)"),
@@ -159,7 +170,6 @@ async def test_voice(
     except Exception:
         pass
 
-
     # Prepare numpy array for test embedding
     test_vec = np.array(test_embedding, dtype=np.float32)
 
@@ -177,7 +187,12 @@ async def test_voice(
         norm_enroll = np.linalg.norm(enroll_emb)
         denom = (norm_test * norm_enroll + 1e-8)
         score = float(dot) / denom
-        matches.append({"user_id": user_id, "score": score})
+        matches.append({
+            "user_id": user_id,
+            "score": score,
+            "enrollment_id": user_id,  # Frontend expects this field name
+            "similarity": score  # Frontend expects this field name
+        })
 
     # Rank by descending similarity
     matches_sorted = sorted(matches, key=lambda x: x["score"], reverse=True)
@@ -194,6 +209,101 @@ async def test_voice(
 
 
 # PUBLIC_INTERFACE
+@app.post(
+    "/enroll/voice",
+    tags=["voice"],
+    summary="Enroll a user's voice by uploading an audio file",
+    description=(
+        "Upload an audio file to enroll a user's voice profile. The audio is processed to "
+        "generate an embedding using Speechbrain ECAPA-voxceleb model and stored for "
+        "future similarity matching."
+    ),
+    response_description="Enrollment confirmation with status and details.",
+)
+async def enroll_voice(
+    user_id: str = Query(..., description="Unique identifier for the user"),
+    file: UploadFile = File(..., description="Audio file for enrollment (wav, mp3, etc.)"),
+):
+    """
+    PUBLIC_INTERFACE
+
+    Enroll a user's voice by processing their uploaded audio file and storing the embedding.
+
+    - Accepts: WAV, MP3, M4A, OPUS, OGG files.
+    - Generates: Speechbrain ECAPA-voxceleb embedding
+    - Stores: User profile with embedding for future matching
+
+    Args:
+        user_id (str): Unique user identifier
+        file (UploadFile): Audio file for enrollment
+
+    Returns:
+        JSON: {"status": "success", "message": "...", "user_id": "..."}
+    """
+    # Validate file type
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in [".wav", ".mp3", ".m4a", ".opus", ".ogg"]:
+        raise HTTPException(status_code=400, detail="Unsupported file type")
+
+    # Save uploaded file temporarily
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    file_path = os.path.join(UPLOAD_DIR, f"{user_id}_{file.filename}")
+
+    try:
+        with open(file_path, "wb") as out_file:
+            while True:
+                chunk = await file.read(8192)
+                if not chunk:
+                    break
+                out_file.write(chunk)
+    except Exception as e:
+        raise HTTPException(status_code=500,
+                            detail=f"Failed saving file: {str(e)}")
+
+    # Compute embedding
+    try:
+        embedding = compute_embedding(file_path)
+    except Exception as e:
+        # Clean up file on error
+        try:
+            os.remove(file_path)
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=500,
+            detail=f"Embedding computation failed: {str(e)}"
+        )
+
+    # Store enrollment
+    try:
+        enrollments = load_enrollments()
+        enrollments[user_id] = {
+            "filename": file.filename,
+            "embedding": embedding,
+            "file_path": file_path,
+            "enrolled_at": json.loads(json.dumps({"timestamp": "now"}))
+        }
+        save_enrollments(enrollments)
+
+        return JSONResponse(
+            content={
+                "status": "success",
+                "message": f"Voice enrollment successful for user {user_id}",
+                "user_id": user_id,
+                "filename": file.filename
+            },
+            status_code=status.HTTP_201_CREATED,
+        )
+    except Exception as e:
+        # Clean up file on storage error
+        try:
+            os.remove(file_path)
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to store enrollment: {str(e)}"
+        )
 
 
 @app.get(
@@ -212,7 +322,7 @@ def enrollment_status(
         user_id (str): Unique user identifier.
 
     Returns:
-        JSON status: 'enrolled' + basic info, or 'not_enrolled'
+        JSON status: 'enrolled' boolean + basic info
     """
     enrollments = load_enrollments()
     if user_id in enrollments:
@@ -224,18 +334,19 @@ def enrollment_status(
             and len(enrollment_data["embedding"]) > 0
         )
         return {
+            "enrolled": True,
             "status": "enrolled",
             "filename": enrollment_data.get("filename", ""),
             "has_embedding": has_embedding,
         }
     else:
         return {
+            "enrolled": False,
             "status": "not_enrolled"
         }
 
 
 # PUBLIC_INTERFACE
-
 class MatchLogEntry(BaseModel):
     """Log entry for an audio chunk similarity match."""
     chunk_filename: str = Field(..., description="Chunked audio filename that matched")
