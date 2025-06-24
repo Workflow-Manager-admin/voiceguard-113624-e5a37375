@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import './App.css';
 
 /**
@@ -11,12 +11,52 @@ function App() {
   const [uploadStatus, setUploadStatus] = useState('idle'); // idle | uploading | success | error
   const [message, setMessage] = useState('');
 
+  // Enrollment status states
+  const [enrollmentStatus, setEnrollmentStatus] = useState(null); // null | true | false
+  const [enrollmentLoading, setEnrollmentLoading] = useState(true);
+  const [enrollmentError, setEnrollmentError] = useState('');
+
+  // For demo, a static user id is used
+  const USER_ID = 'demo_user';
+
   // Handle file selection
   const handleFileChange = (event) => {
     setSelectedFile(event.target.files[0]);
     setMessage('');
     setUploadStatus('idle');
   };
+
+  // Fetch enrollment status from backend
+  // PUBLIC_INTERFACE
+  async function fetchEnrollmentStatus() {
+    setEnrollmentLoading(true);
+    setEnrollmentError('');
+    setEnrollmentStatus(null);
+    try {
+      const url = process.env.REACT_APP_BACKEND_URL
+        ? `${process.env.REACT_APP_BACKEND_URL}/enroll/status?user_id=${encodeURIComponent(USER_ID)}`
+        : `http://localhost:3001/enroll/status?user_id=${encodeURIComponent(USER_ID)}`;
+      const res = await fetch(url);
+      if (!res.ok) {
+        setEnrollmentError('Error fetching status.');
+        setEnrollmentStatus(null);
+      } else {
+        const data = await res.json();
+        // Accepts: { enrolled: true } or { enrolled: false }
+        setEnrollmentStatus(data && typeof data.enrolled === 'boolean' ? data.enrolled : null);
+      }
+    } catch (error) {
+      setEnrollmentError('Could not connect to backend.');
+      setEnrollmentStatus(null);
+    }
+    setEnrollmentLoading(false);
+  }
+
+  // Fetch on mount
+  useEffect(() => {
+    fetchEnrollmentStatus();
+    // eslint-disable-next-line
+  }, []);
 
   // PUBLIC_INTERFACE
   // Handles the form submission to upload audio for enrollment.
@@ -35,10 +75,11 @@ function App() {
       formData.append('file', selectedFile);
 
       // Upload to backend (adjust /enroll/voice if proxy not set up)
+      const url = process.env.REACT_APP_BACKEND_URL
+        ? `${process.env.REACT_APP_BACKEND_URL}/enroll/voice?user_id=${encodeURIComponent(USER_ID)}`
+        : `http://localhost:3001/enroll/voice?user_id=${encodeURIComponent(USER_ID)}`;
       const res = await fetch(
-        process.env.REACT_APP_BACKEND_URL
-          ? `${process.env.REACT_APP_BACKEND_URL}/enroll/voice`
-          : 'http://localhost:3001/enroll/voice',
+        url,
         {
           method: 'POST',
           body: formData,
@@ -47,6 +88,8 @@ function App() {
       if (res.ok) {
         setUploadStatus('success');
         setMessage('Upload successful! Your voice reference has been enrolled.');
+        // Re-fetch enrollment status so the UI updates
+        fetchEnrollmentStatus();
       } else {
         setUploadStatus('error');
         const data = await res.json().catch(() => ({}));
@@ -79,6 +122,27 @@ function App() {
             <div className="description">
               Upload your reference audio file so the system can monitor media for matches to your voice.
             </div>
+
+            {/* Enrollment status visual indicator */}
+            <div style={{ margin: '18px 0' }}>
+              {enrollmentLoading && (
+                <div className="upload-message uploading">Checking enrollment status...</div>
+              )}
+              {enrollmentError && (
+                <div className="upload-message error">Status: {enrollmentError}</div>
+              )}
+              {!enrollmentLoading && enrollmentStatus === true && (
+                <div className="upload-message success">
+                  <span style={{ marginRight: 10, fontWeight: 700 }}>ENROLLED</span> Your voice reference is active.
+                </div>
+              )}
+              {!enrollmentLoading && enrollmentStatus === false && (
+                <div className="upload-message error">
+                  <span style={{ marginRight: 10, fontWeight: 700 }}>NOT ENROLLED</span> No voice profile found.
+                </div>
+              )}
+            </div>
+
             {/* Audio upload form */}
             <form className="voice-upload-form" onSubmit={handleSubmit}>
               <input
