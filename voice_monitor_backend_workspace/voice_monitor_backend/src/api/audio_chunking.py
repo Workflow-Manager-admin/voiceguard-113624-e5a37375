@@ -55,7 +55,7 @@ def chunk_wav_audio_file(input_wav_path: str, chunk_sec: int = CHUNK_SECONDS) ->
         if chunk_waveform.shape[1] == 0:
             continue
 
-        chunk_fn = f"{base_name}_chunk{ i + 1:03d }_{chunk_sec}s.wav"
+        chunk_fn = f"{base_name}_chunk{i + 1:03d}_{chunk_sec}s.wav"
         chunk_path = os.path.join(CHUNKED_AUDIO_DIR, chunk_fn)
 
         torchaudio.save(chunk_path, chunk_waveform, sample_rate)

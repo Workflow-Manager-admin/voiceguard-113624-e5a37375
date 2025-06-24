@@ -48,3 +48,5 @@ torchaudio>=0.13.0
 speechbrain==0.5.16
 huggingface_hub>=0.18.0
 yt-dlp==2024.4.9
+
+# Logging for match alerting
