@@ -2,10 +2,19 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi import status
+from fastapi import BackgroundTasks
+
 import os
 import json
 import numpy as np
 from typing import Dict
+
+# Media crawling
+try:
+    from .media_crawler import crawl_youtube_and_download_audio, load_status
+except ImportError:
+    # Local dev fallback if running as script
+    from media_crawler import crawl_youtube_and_download_audio, load_status
 
 # Import Speechbrain and torch
 import torch
@@ -90,6 +99,85 @@ def health_check():
 
 
 # PUBLIC_INTERFACE
+
+# PUBLIC_INTERFACE
+
+
+@app.post(
+    "/crawl/youtube",
+    tags=["media", "crawl"],
+    summary="Trigger YouTube media crawl and audio extraction",
+    description=(
+        "Triggers crawling of a YouTube channel, playlist, or video URL. "
+        "Downloads newest audio and returns summary."
+    ),
+    response_description="Crawling job result summary as JSON.",
+)
+async def trigger_youtube_crawl(
+    background_tasks: BackgroundTasks,
+    youtube_url: str = Query(
+        ..., description="YouTube channel/playlist/video URL"
+    ),
+    max_videos: int = Query(
+        3,
+        ge=1,
+        le=10,
+        description="Number of latest videos to crawl/download",
+    ),
+):
+    """
+    PUBLIC_INTERFACE
+
+    Initiate a crawl of YouTube media, downloading audio WAVs for up to `max_videos` videos.
+    Operation may take time; runs in background and status can be polled via /crawl/status.
+
+    Args:
+        youtube_url (str): YouTube channel/playlist/video url to crawl.
+        max_videos (int): Max number of latest videos to download.
+
+    Returns:
+        JSON: Job initiation status and preliminary summary.
+    """
+
+    def run_crawl():
+        crawl_youtube_and_download_audio(youtube_url, max_videos=max_videos)
+
+    background_tasks.add_task(run_crawl)
+    return {
+        "status": "started",
+        "detail": (
+            f"Crawling {youtube_url} for up to {max_videos} videos. "
+            "Check /crawl/status."
+        ),
+    }
+
+
+# PUBLIC_INTERFACE
+@app.get(
+    "/crawl/status",
+    tags=["media", "crawl"],
+    summary="Check latest media crawl status",
+    description="Returns status of the most recent crawl job (YouTube, etc.).",
+    response_description="Status info, download results, or error.",
+)
+def get_latest_crawl_status():
+    """
+    PUBLIC_INTERFACE
+
+    Get the status/result of the last media crawling and audio extraction job.
+
+    Returns:
+        JSON: status for the most recent crawl, with files, timestamps, etc.
+    """
+    status_data = load_status()
+    if not status_data:
+        return {
+            "status": "no_recent_crawl",
+            "detail": (
+                "No crawl has been performed yet in this backend instance."
+            ),
+        }
+    return status_data
 
 
 @app.post(
@@ -186,6 +274,85 @@ async def test_voice(
 
 
 # PUBLIC_INTERFACE
+
+# PUBLIC_INTERFACE
+
+
+@app.post(
+    "/crawl/youtube",
+    tags=["media", "crawl"],
+    summary="Trigger YouTube media crawl and audio extraction",
+    description=(
+        "Triggers crawling of a YouTube channel, playlist, or video URL. "
+        "Downloads newest audio and returns summary."
+    ),
+    response_description="Crawling job result summary as JSON.",
+)
+async def trigger_youtube_crawl(
+    background_tasks: BackgroundTasks,
+    youtube_url: str = Query(
+        ..., description="YouTube channel/playlist/video URL"
+    ),
+    max_videos: int = Query(
+        3,
+        ge=1,
+        le=10,
+        description="Number of latest videos to crawl/download",
+    ),
+):
+    """
+    PUBLIC_INTERFACE
+
+    Initiate a crawl of YouTube media, downloading audio WAVs for up to `max_videos` videos.
+    Operation may take time; runs in background and status can be polled via /crawl/status.
+
+    Args:
+        youtube_url (str): YouTube channel/playlist/video url to crawl.
+        max_videos (int): Max number of latest videos to download.
+
+    Returns:
+        JSON: Job initiation status and preliminary summary.
+    """
+
+    def run_crawl():
+        crawl_youtube_and_download_audio(youtube_url, max_videos=max_videos)
+
+    background_tasks.add_task(run_crawl)
+    return {
+        "status": "started",
+        "detail": (
+            f"Crawling {youtube_url} for up to {max_videos} videos. "
+            "Check /crawl/status."
+        ),
+    }
+
+
+# PUBLIC_INTERFACE
+@app.get(
+    "/crawl/status",
+    tags=["media", "crawl"],
+    summary="Check latest media crawl status",
+    description="Returns status of the most recent crawl job (YouTube, etc.).",
+    response_description="Status info, download results, or error.",
+)
+def get_latest_crawl_status():
+    """
+    PUBLIC_INTERFACE
+
+    Get the status/result of the last media crawling and audio extraction job.
+
+    Returns:
+        JSON: status for the most recent crawl, with files, timestamps, etc.
+    """
+    status_data = load_status()
+    if not status_data:
+        return {
+            "status": "no_recent_crawl",
+            "detail": (
+                "No crawl has been performed yet in this backend instance."
+            ),
+        }
+    return status_data
 @app.get(
     "/enroll/status",
     tags=["voice"],
