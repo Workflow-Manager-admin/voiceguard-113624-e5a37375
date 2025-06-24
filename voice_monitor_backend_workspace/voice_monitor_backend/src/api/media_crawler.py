@@ -36,16 +36,24 @@ def crawl_youtube_and_download_audio(
     youtube_url: str, max_videos: int = 3
 ) -> Dict:
     """
-    Crawls a YouTube URL (channel or playlist or video), downloads latest audio(s).
+    Crawls a YouTube URL (channel or playlist or video), downloads latest audio(s)
+    and chunks each audio file into fixed-duration segments suitable for downstream
+    similarity processing.
 
     Args:
         youtube_url (str): YouTube URL to crawl.
         max_videos (int): How many latest videos to process.
 
     Returns:
-        dict: status information including downloaded files.
+        dict: status information including downloaded and chunked files.
     """
     import yt_dlp
+
+    # Import chunking inline to avoid cyclic or cold import issues
+    try:
+        from .audio_chunking import chunk_wav_audio_file
+    except ImportError:
+        from audio_chunking import chunk_wav_audio_file
 
     timestamp = datetime.datetime.now().isoformat()
     status = {
@@ -54,6 +62,7 @@ def crawl_youtube_and_download_audio(
         "target_url": youtube_url,
         "success": False,
         "downloaded_files": [],
+        "audio_chunks": {},
         "error": None,
     }
 
@@ -76,6 +85,7 @@ def crawl_youtube_and_download_audio(
             else:
                 entries = [result]
             files = []
+            audio_chunks = {}
             for entry in entries:
                 base_id = entry.get("id")
                 ext = "wav"
@@ -90,7 +100,14 @@ def crawl_youtube_and_download_audio(
                             "filepath": save_path,
                         }
                     )
+                    try:
+                        # Automatically chunk the newly downloaded audio
+                        chunk_files = chunk_wav_audio_file(save_path)
+                        audio_chunks[base_id] = chunk_files
+                    except Exception as ex:
+                        audio_chunks[base_id] = {"error": str(ex)}
             status["downloaded_files"] = files
+            status["audio_chunks"] = audio_chunks
             status["success"] = True
     except Exception as ex:
         status["error"] = str(ex)
