@@ -18,9 +18,15 @@ function DetectedMatches() {
     setLoading(true);
     setError("");
     try {
-      const url = process.env.REACT_APP_BACKEND_URL
-        ? `${process.env.REACT_APP_BACKEND_URL}/matches/active`
-        : "http://localhost:3001/matches/active";
+      let apiBase = process.env.REACT_APP_BACKEND_URL;
+      if (!apiBase) {
+        if (window.location.hostname !== "localhost") {
+          apiBase = window.location.origin.replace(/:3000\b/, ":3001");
+        } else {
+          apiBase = "http://localhost:3001";
+        }
+      }
+      const url = `${apiBase}/matches/active`;
       const response = await fetch(url);
       if (!response.ok) {
         setError("Error fetching detected matches.");

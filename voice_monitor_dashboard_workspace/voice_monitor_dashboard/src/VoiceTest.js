@@ -42,10 +42,15 @@ function VoiceTest() {
       formData.append('file', selectedFile);
 
       // The backend is assumed to have /test/voice accepting (multipart) files and returning results
-      const url =
-        process.env.REACT_APP_BACKEND_URL
-          ? `${process.env.REACT_APP_BACKEND_URL}/test/voice`
-          : `http://localhost:3001/test/voice`;
+      let apiBase = process.env.REACT_APP_BACKEND_URL;
+      if (!apiBase) {
+        if (window.location.hostname !== "localhost") {
+          apiBase = window.location.origin.replace(/:3000\b/, ":3001");
+        } else {
+          apiBase = "http://localhost:3001";
+        }
+      }
+      const url = `${apiBase}/test/voice`;
       const response = await fetch(url, {
         method: 'POST',
         body: formData,

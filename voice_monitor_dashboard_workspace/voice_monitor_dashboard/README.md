@@ -45,6 +45,39 @@ It correctly bundles React in production mode and optimizes the build for the be
 
 ## Customization
 
+## Backend API URL and Cross-Origin Access
+
+By default, this dashboard expects the backend API to be running on port 3001 of the same host (`http://localhost:3001` during local development).
+If deploying to a preview or production environment without setting `REACT_APP_BACKEND_URL`, the app will attempt to locate the backend on the same host (switching the port from 3000 to 3001).
+
+### Setting the backend API URL manually
+
+Set an environment variable in your hosting system or `.env` file before build:
+
+```bash
+REACT_APP_BACKEND_URL="https://your-backend-domain:3001"
+```
+
+This is useful in production or if the frontend and backend server origins/ports are different.
+
+### CORS Requirements
+
+The backend (FastAPI) must send CORS headers allowing requests from your frontend host. In development, configure FastAPI:
+
+```python
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],  # Or your deployed frontend origin
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+```
+
+If using a cloud IDE/preview deployment, ensure CORS allows the relevant preview subdomain!
+
 ### Colors
 
 The main brand colors are defined as CSS variables in `src/App.css`:

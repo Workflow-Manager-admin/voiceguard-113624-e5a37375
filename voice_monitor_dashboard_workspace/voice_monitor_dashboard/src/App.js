@@ -35,9 +35,17 @@ function App() {
     setEnrollmentError('');
     setEnrollmentStatus(null);
     try {
-      const url = process.env.REACT_APP_BACKEND_URL
-        ? `${process.env.REACT_APP_BACKEND_URL}/enroll/status?user_id=${encodeURIComponent(USER_ID)}`
-        : `http://localhost:3001/enroll/status?user_id=${encodeURIComponent(USER_ID)}`;
+      // Prefer dynamic window.location.origin when in preview/production if REACT_APP_BACKEND_URL is not set
+      let apiBase = process.env.REACT_APP_BACKEND_URL;
+      if (!apiBase) {
+        // Detect if running on a known preview (ex: /preview.html on Kavia) and guess backend URL port 3001
+        if (window.location.hostname !== 'localhost') {
+          apiBase = window.location.origin.replace(/:3000\b/, ':3001');
+        } else {
+          apiBase = 'http://localhost:3001';
+        }
+      }
+      const url = `${apiBase}/enroll/status?user_id=${encodeURIComponent(USER_ID)}`;
       const res = await fetch(url);
       if (!res.ok) {
         setEnrollmentError('Error fetching status.');
@@ -76,10 +84,16 @@ function App() {
       const formData = new FormData();
       formData.append('file', selectedFile);
 
-      // Upload to backend (adjust /enroll/voice if proxy not set up)
-      const url = process.env.REACT_APP_BACKEND_URL
-        ? `${process.env.REACT_APP_BACKEND_URL}/enroll/voice?user_id=${encodeURIComponent(USER_ID)}`
-        : `http://localhost:3001/enroll/voice?user_id=${encodeURIComponent(USER_ID)}`;
+      // Upload to backend
+      let apiBase = process.env.REACT_APP_BACKEND_URL;
+      if (!apiBase) {
+        if (window.location.hostname !== 'localhost') {
+          apiBase = window.location.origin.replace(/:3000\b/, ':3001');
+        } else {
+          apiBase = 'http://localhost:3001';
+        }
+      }
+      const url = `${apiBase}/enroll/voice?user_id=${encodeURIComponent(USER_ID)}`;
       const res = await fetch(
         url,
         {
