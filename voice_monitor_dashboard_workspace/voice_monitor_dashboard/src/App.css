@@ -106,3 +106,42 @@ body {
   padding: 12px 24px;
   font-size: 1.1rem;
 }
+
+/* --- Audio upload form styles --- */
+.voice-upload-form {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 18px;
+  justify-content: center;
+}
+
+.voice-upload-input[type="file"] {
+  color: var(--text-color);
+  background: transparent;
+  border: 1px solid var(--border-color);
+  padding: 6px;
+  border-radius: 4px;
+}
+
+.upload-message {
+  margin-top: 18px;
+  font-size: 1rem;
+  border-radius: 4px;
+  padding: 10px 16px;
+  font-weight: 500;
+  display: inline-block;
+}
+
+.upload-message.success {
+  background-color: #2ecc40;
+  color: #fff;
+}
+.upload-message.error {
+  background-color: #e74c3c;
+  color: #fff;
+}
+.upload-message.uploading {
+  background-color: #ffc107;
+  color: #000;
+}
