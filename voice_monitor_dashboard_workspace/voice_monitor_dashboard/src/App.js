@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './App.css';
 import VoiceTest from './VoiceTest';
+import DetectedMatches from './DetectedMatches';
 
 /**
  * PUBLIC_INTERFACE
@@ -177,6 +178,9 @@ function App() {
             )}
           </div>
           <VoiceTest />
+
+          {/* Detected Matches Dashboard */}
+          <DetectedMatches />
         </div>
       </main>
     </div>
