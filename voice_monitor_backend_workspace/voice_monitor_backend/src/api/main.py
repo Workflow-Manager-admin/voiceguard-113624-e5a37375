@@ -3,13 +3,49 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import os
 import json
-import hashlib
 from typing import Dict
+
+# Import Speechbrain and torch
+import torch
+from speechbrain.pretrained import EncoderClassifier
 
 # Constants
 UPLOAD_DIR = "uploaded_voices"
 EMBEDDING_FILE = os.path.join(UPLOAD_DIR, "enrollments.json")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# Speechbrain model setup as singleton (loaded lazily)
+_classifier = None
+
+
+def get_speechbrain_classifier():
+    """
+    Loads (if not already loaded) the speechbrain ECAPA-voxceleb classifier.
+    Avoids reloading on each request.
+    """
+    global _classifier
+    if _classifier is None:
+        # Model path can be overridden by env var if pre-downloaded,
+        # else automatically downloads from HuggingFace
+        _classifier = EncoderClassifier.from_hparams(
+            source="speechbrain/spkrec-ecapa-voxceleb",
+            run_opts={"device": "cuda" if torch.cuda.is_available() else "cpu"}
+        )
+    return _classifier
+
+
+def compute_embedding(file_path: str):
+    """
+    Returns a numpy array representation of the Speechbrain ECAPA-voxceleb
+    embedding for the provided audio file.
+    """
+    classifier = get_speechbrain_classifier()
+    signal, fs = classifier.load_audio(file_path)
+    # Batched input expected shape (batch, time)
+    embedding = classifier.encode_batch(signal.unsqueeze(0))
+    # Convert Torch tensor to list for JSON serialization
+    embedding_np = embedding.squeeze().detach().cpu().numpy().tolist()
+    return embedding_np
 
 
 # Simple persistence for demonstration (would be DB in prod)
@@ -23,18 +59,6 @@ def load_enrollments() -> Dict[str, dict]:
 def save_enrollments(data: Dict[str, dict]) -> None:
     with open(EMBEDDING_FILE, "w") as f:
         json.dump(data, f)
-
-
-def simulate_voice_embedding(filepath: str) -> str:
-    """Fake a 'voice embedding' by hashing the file. Replace with real model in production."""
-    hasher = hashlib.sha256()
-    try:
-        with open(filepath, "rb") as f:
-            for chunk in iter(lambda: f.read(4096), b""):
-                hasher.update(chunk)
-        return hasher.hexdigest()
-    except Exception:
-        return ""
 
 
 app = FastAPI(
@@ -61,6 +85,7 @@ def health_check():
     """
     return {"message": "Healthy"}
 
+
 # PUBLIC_INTERFACE
 @app.post(
     "/enroll/voice",
@@ -74,10 +99,11 @@ async def upload_voice(
     user_id: str = Query(..., description="Unique identifier for the user"),
 ):
     """
-    Upload a voice/audio file for enrollment.
+    Upload a voice/audio file for enrollment using Speechbrain ECAPA-voxceleb to compute speaker
+    embedding.
 
     Args:
-        file (UploadFile): Audio file, accepted formats: wav, mp3.
+        file (UploadFile): Audio file, accepted formats: wav, mp3, m4a, opus, ogg.
         user_id (str): Unique user identifier.
 
     Returns:
@@ -96,8 +122,14 @@ async def upload_voice(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed saving file: {str(e)}")
 
-    # Simulate embedding and store enrollment
-    embedding = simulate_voice_embedding(save_path)
+    # Compute real voiceprint embedding and store enrollment
+    try:
+        embedding = compute_embedding(save_path)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Embedding computation failed: {str(e)}"
+        )
     enrollments = load_enrollments()
     enrollments[user_id] = {
         "filename": safe_filename,
@@ -109,10 +141,13 @@ async def upload_voice(
         content={
             "status": "success",
             "filename": safe_filename,
-            "detail": "File uploaded. Enrollment completed (simulated).",
+            "detail": (
+                "File uploaded. Enrollment with Speechbrain embedding completed."
+            ),
         },
         status_code=201
     )
+
 
 # PUBLIC_INTERFACE
 @app.get(
@@ -136,10 +171,16 @@ def enrollment_status(
     enrollments = load_enrollments()
     if user_id in enrollments:
         enrollment_data = enrollments[user_id]
+        # Since we now store a list/array embedding, check that it is a non-empty list
+        has_embedding = (
+            enrollment_data.get("embedding") is not None
+            and isinstance(enrollment_data["embedding"], list)
+            and len(enrollment_data["embedding"]) > 0
+        )
         return {
             "status": "enrolled",
             "filename": enrollment_data.get("filename", ""),
-            "has_embedding": bool(enrollment_data.get("embedding")),
+            "has_embedding": has_embedding,
         }
     else:
         return {
