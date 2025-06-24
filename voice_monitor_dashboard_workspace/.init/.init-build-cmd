@@ -1,0 +1,4 @@
+{
+    "command": "npm install && npx tsc --noEmit && npm test -- --ci",
+    "working_directory": "/home/kavia/workspace/code-generation/voiceguard-113624-e5a37375/voice_monitor_dashboard_workspace/voice_monitor_dashboard"
+}

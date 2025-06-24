@@ -1,0 +1,4 @@
+{
+    "command": "source venv/bin/activate && pip install -r requirements.txt",
+    "working_directory": "/home/kavia/workspace/code-generation/voiceguard-113624-e5a37375/voice_monitor_backend_workspace/voice_monitor_backend"
+}
