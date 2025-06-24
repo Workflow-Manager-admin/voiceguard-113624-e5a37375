@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './App.css';
+import VoiceTest from './VoiceTest';
 
 /**
  * PUBLIC_INTERFACE
@@ -175,6 +176,7 @@ function App() {
               <div className="upload-message">{message}</div>
             )}
           </div>
+          <VoiceTest />
         </div>
       </main>
     </div>
